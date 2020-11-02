@@ -1,0 +1,17 @@
+{application, ebanx,
+ [{description, "EBANX interview challenge"},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {mod, {ebanx_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    jsone,
+    cowboy
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
