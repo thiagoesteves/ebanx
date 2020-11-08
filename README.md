@@ -69,9 +69,29 @@ You need to clone the repository and download rebar/rebar3 (if it's not already 
 git clone https://github.com/thiagoesteves/ebanx.git
 cd ebanx
 ```
-To compile and run
+To compile and run (default port 8080)
 ```
 make
+```
+
+In order to send request using command line, the curl command can be used as follow:
+```
+# Reset
+curl -i -H "Content-Type: application/json" -X POST http://localhost:8080/reset
+# Create account with initial balance
+curl -i -H "Content-Type: application/json" -X POST -d '{"type":"deposit", "destination":"100", "amount":10}'  http://localhost:8080/event
+# Deposit into existent
+curl -i -H "Content-Type: application/json" -X POST -d '{"type":"deposit", "destination":"100", "amount":10}'  http://localhost:8080/event
+# Get balance for existing account
+curl -i  http://localhost:8080/balance?account_id=100
+# Withdraw from existent
+curl -i -H "Content-Type: application/json" -X POST -d '{"type":"withdraw", "origin":"100", "amount":5}'  http://localhost:8080/event
+# Withdraw from non-existing account
+curl -i -H "Content-Type: application/json" -X POST -d '{"type":"withdraw", "origin":"300", "amount":5}'  http://localhost:8080/event
+# Transfer from non existent
+curl -i -H "Content-Type: application/json" -X POST -d '{"type":"transfer", "origin":"101", "amount":15, "destination":"100"}'  http://localhost:8080/event
+# Transfer from existent to non existent
+curl -i -H "Content-Type: application/json" -X POST -d '{"type":"transfer", "origin":"100", "amount":15, "destination":"300"}'  http://localhost:8080/event
 ```
 
 ### Unit Test and coverage

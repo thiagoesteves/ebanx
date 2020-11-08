@@ -43,6 +43,10 @@
 -define(REST_GET,  <<"GET">>).
 -define(REST_POST, <<"POST">>).
 
+%% Rest Replies
+-define(REST_OK,    <<"OK">>).
+-define(REST_EMPTY, <<"0">>).
+
 %% Content Types
 -define(CONTENT_HTML, <<"text/html">>).
 -define(CONTENT_JSON, <<"application/json">>).
@@ -52,15 +56,42 @@
 %%% COWBOY system callbacks implementation
 %%%===================================================================
 
+%%--------------------------------------------------------------------
+%% @doc This function defines HTTP methods allowed by cowboy.
+%%
+%% @param Req0 Current Request info
+%% @param State Current State
+%% @end
+%%--------------------------------------------------------------------
+-spec allowed_methods(map(), cowboy:req()) -> {list(), cowboy:req(), any()}.
 allowed_methods(Req0, State) ->
   Methods = [?REST_GET, ?REST_POST],
   {Methods, Req0, State}.
 
+%%--------------------------------------------------------------------
+%% @doc This function is for sending the resource representation
+%%      in the response body.
+%%
+%% @param Req0 Current Request info
+%% @param State Current State
+%% @end
+%%--------------------------------------------------------------------
+-spec content_types_provided(map(), cowboy:req()) -> {list(), cowboy:req(), any()}.
 content_types_provided(Req0, State) ->
   {[
-     {?CONTENT_HTML, provided_operation_to_html}
+     {?CONTENT_HTML, provided_operation_to_html},
+     {?CONTENT_JSON, provided_operation_to_html}
    ], Req0, State}.
 
+%%--------------------------------------------------------------------
+%% @doc This function is for processing the resource representation in
+%%      the request body.
+%%
+%% @param Req0 Current Request info
+%% @param State Current State
+%% @end
+%%--------------------------------------------------------------------
+-spec content_types_accepted(map(), cowboy:req()) -> {list(), cowboy:req(), any()}.
 content_types_accepted(Req0, State) ->
   {[
      {?CONTENT_JSON, accepted_operation_to_json}
@@ -74,15 +105,10 @@ allow_missing_post(Req0, State) ->
 %%%===================================================================
 
 %% Execute Operation for html request
-provided_operation_to_html(Req0, #{operation := reset} = State) ->
-  ?LOG_INFO("HTTP Reset Operation"),
-  ok = ebanx_bank:reset(),
-  {<<"">>, Req0, State};
-
 provided_operation_to_html(Req0, #{operation := get,
                                    account_id := Id} = State) ->
   ?LOG_INFO("HTTP Get Operation for account_id: ~p", [Id]),
-  {ok, Balance} = ebanx_bank:get_balance(l2b(Id)),
+  {ok, Balance} = ebanx_bank:get_balance(Id),
   {Balance, Req0, State};
 
 provided_operation_to_html(Req0, #{operation := help} = State) ->
@@ -99,9 +125,16 @@ provided_operation_to_html(Req0, #{operation := help} = State) ->
   {Body, Req0, State}.
 
 %% Execute Operation for json application
+accepted_operation_to_json(Req0, #{operation := reset}) ->
+  ?LOG_INFO("HTTP Post reset operation"),
+  ok = ebanx_bank:reset(),
+  Req1 = cowboy_req:set_resp_body(?REST_OK, Req0),
+  cowboy_req:reply(?HMTL_OK, Req1);
+
+%% Execute Operation for json application
 accepted_operation_to_json(Req0, #{operation := update,
-                                   post_map := PostMap} = State) ->
-  ?LOG_INFO("HTTP Post Operation for ~p", [PostMap]),
+                                   post_map := PostMap}) ->
+  ?LOG_INFO("HTTP Post Operation for ~p Req: ~p", [PostMap, Req0]),
   Res = ebanx_bank:update(PostMap),
   Req1 = cowboy_req:set_resp_body(Res, Req0),
   cowboy_req:reply(?HMTL_OK_CREATED, Req1).
@@ -116,10 +149,13 @@ resource_exists(Req0, #{operation := update} = State) ->
   %% Check method and json convertion
   case { cowboy_req:method(Req1), maybe_json_decode(MapBin) } of
     {?REST_POST, {ok, Map}} ->
-        %% TODO: check if resource exist in case of transfer
-        Status = ebanx_bank:account_exist(Map),
+        %% Check if resource exist in case of transfer
+        {Status, Req2} = case ebanx_bank:account_exist(Map) of
+          true ->  {true, Req1};
+          false -> {false, cowboy_req:set_resp_body(?REST_EMPTY, Req1)}
+        end,
         ?LOG_INFO("HTTP Update Status: ~p", [Status]),
-        {Status, Req1, State#{post_map := Map}};
+        {Status, Req2, State#{post_map := Map}};
     _ ->
         ?LOG_ERROR("HTTP Invalid method or received json"),
         {false, Req1, State}
@@ -128,9 +164,10 @@ resource_exists(Req0, #{operation := update} = State) ->
 resource_exists(Req0, #{operation := get} = State) ->
   case { cowboy_req:method(Req0), maybe_cowboy_match_qs([account_id], Req0) } of
     { ?REST_GET, #{account_id := Id} } ->
-        %% TODO: check if resource exist
+        %% Check if resource exist
         Status = ebanx_bank:account_exist(Id),
-        {Status, Req0, State#{account_id := b2l(Id)}};
+        Req1 = cowboy_req:set_resp_body(?REST_EMPTY, Req0),
+        {Status, Req1, State#{account_id := Id}};
     _ -> ?LOG_ERROR("HTTP Invalid method or received json"),
         {false, Req0, State}
   end;
@@ -141,7 +178,7 @@ resource_exists(Req0, #{operation := help} = State) ->
 %%%===================================================================
 %%% API
 %%%===================================================================
-
+-spec init(map(), cowboy:req()) -> {any(), cowboy:req(), any()}.
 init(Req0, Opts) ->
   logger:set_module_level(?MODULE, error),
   [Op | _] = Opts,
@@ -159,6 +196,7 @@ init(Req0, Opts) ->
 %% @param Req request
 %% @end
 %%--------------------------------------------------------------------
+-spec maybe_cowboy_match_qs(list(), cowboy:req()) -> map() | undefined.
 maybe_cowboy_match_qs(List, Req) ->
   try cowboy_req:match_qs(List, Req) of
     Res -> Res
@@ -170,20 +208,14 @@ maybe_cowboy_match_qs(List, Req) ->
 %%--------------------------------------------------------------------
 %% @doc Try to decode json string
 %%
-%% @param String String to be decoded
+%% @param Bin Binary map to be decoded
 %% @end
 %%--------------------------------------------------------------------
--spec maybe_json_decode(string()) -> {ok | error, map() | json}.
-maybe_json_decode(Str) ->
-  try jsone:decode(Str) of
+-spec maybe_json_decode(binary()) -> {ok, map()} | {error, json}.
+maybe_json_decode(Bin) ->
+  try jsone:decode(Bin) of
     DecodedStr -> {ok, DecodedStr}
   catch
     _:_ ->
         {error, json}
   end.
-
-b2l(Bin) ->
-  erlang:binary_to_list(Bin).
-
-l2b(Bin) ->
-  erlang:list_to_binary(Bin).

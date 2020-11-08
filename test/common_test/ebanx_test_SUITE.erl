@@ -56,7 +56,7 @@
          ebanx_double_deposit_ok/1,
          ebanx_transfer_amount_ok/1,
          ebanx_transfer_amount_origin_error/1,
-         ebanx_transfer_amount_dest_error/1,
+         ebanx_transfer_amount_dest_non_exist_ok/1,
          ebanx_reset_ok/1,
          ebanx_withdraw_ok/1,
          ebanx_withdraw_error/1,
@@ -72,7 +72,7 @@ all() -> [ebanx_ok,
           ebanx_double_deposit_ok,
           ebanx_transfer_amount_ok,
           ebanx_transfer_amount_origin_error,
-          ebanx_transfer_amount_dest_error,
+          ebanx_transfer_amount_dest_non_exist_ok,
           ebanx_reset_ok,
           ebanx_withdraw_ok,
           ebanx_withdraw_error,
@@ -108,6 +108,11 @@ end_per_suite(_Config) ->
 %%%                init_per_suite
 %%%===================================================================
 init_per_testcase(_, Config) ->
+  %% Start the Server
+  application:ensure_all_started(ebanx),
+
+  %% Reset
+  httpc:request(post, {?LOCAL_URL("/reset"), [], ?APP_JSON_TEXT, []}, [], []),
 
   Config.
 
@@ -149,8 +154,6 @@ ebanx_ok(_Config) ->
 %%% Description: Test the GET method with no parameters in the path
 %%%===================================================================
 ebanx_get_empty_ok(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   Request = {?LOCAL_URL("/"), []},
   {ok, {{_Version, ?HMTL_OK, _ReasonPhrase}, _Headers, Body}} =
@@ -166,8 +169,6 @@ ebanx_get_empty_ok(_Config) ->
 %%% Description: Test the GET method requesting balance
 %%%===================================================================
 ebanx_get_balance_ok(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Create Account
   Info  = jsone:encode( #{?OP_TYPE    => ?OP_DEPOSIT,
@@ -192,8 +193,6 @@ ebanx_get_balance_ok(_Config) ->
 %%% Description: Test the POST method creating an account
 %%%===================================================================
 ebanx_create_account_ok(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Check Account doesn't exist
   RequestAcc = {?LOCAL_URL("/balance?account_id=100"), []},
@@ -225,8 +224,6 @@ ebanx_create_account_ok(_Config) ->
 %%%              a double deposit
 %%%===================================================================
 ebanx_double_deposit_ok(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Check Account doesn't exist
   RequestAcc = {?LOCAL_URL("/balance?account_id=50"), []},
@@ -260,8 +257,6 @@ ebanx_double_deposit_ok(_Config) ->
 %%% Description: Test the POST method transfering money from one to another
 %%%===================================================================
 ebanx_transfer_amount_ok(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Create accounts
   Info1 = jsone:encode( #{?OP_TYPE    => ?OP_DEPOSIT,
@@ -313,8 +308,6 @@ ebanx_transfer_amount_ok(_Config) ->
 %%%              origin account
 %%%===================================================================
 ebanx_transfer_amount_origin_error(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Create only one account
   Info1 = jsone:encode( #{?OP_TYPE    => ?OP_DEPOSIT,
@@ -339,14 +332,12 @@ ebanx_transfer_amount_origin_error(_Config) ->
   ok.
 
 %%%===================================================================
-%%% Function: ebanx_transfer_amount_dest_error
+%%% Function: ebanx_transfer_amount_dest_non_exist_ok
 %%%
-%%% Description: Test the POST method transfering money for an invalid
+%%% Description: Test the POST method transfering money for an non existent
 %%%              destination account
 %%%===================================================================
-ebanx_transfer_amount_dest_error(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
+ebanx_transfer_amount_dest_non_exist_ok(_Config) ->
 
   %% Create only one account
   Info1 = jsone:encode( #{?OP_TYPE    => ?OP_DEPOSIT,
@@ -362,11 +353,11 @@ ebanx_transfer_amount_dest_error(_Config) ->
                           ?ACC_DEST   => <<"123">>,
                           ?ACC_AMOUNT => 95} ),
   RequestTransfer = {?LOCAL_URL("/event"), [], ?APP_JSON_TEXT, Info2},
-  {ok, {{_, HTTP_ERR, _}, _, _}} =
-        httpc:request(post, RequestTransfer, [], []),
 
-  %% Check error
-  ?assertEqual( ?HMTL_NOT_FOUND, HTTP_ERR),
+%% Check success
+  ?assertMatch( {ok, {{_, ?HMTL_OK_CREATED, _}, _,
+  "{\"destination\":{\"balance\":95,\"id\":\"123\"},\"origin\":{\"balance\":25,\"id\":\"833\"}}"}},
+        httpc:request(post, RequestTransfer, [], []) ),
 
   ok.
 
@@ -376,8 +367,6 @@ ebanx_transfer_amount_dest_error(_Config) ->
 %%% Description: Test the RESET request
 %%%===================================================================
 ebanx_reset_ok(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Check Account doesn't exist
   RequestAcc = {?LOCAL_URL("/balance?account_id=505"), []},
@@ -403,7 +392,8 @@ ebanx_reset_ok(_Config) ->
 
   %% Reset and check account doesn't exist anymore
   {ok, {{_, ?HMTL_OK, _}, _, _}} =
-        httpc:request(get, {?LOCAL_URL("/reset"), []}, [], []),
+    httpc:request(post, {?LOCAL_URL("/reset"), [], ?APP_JSON_TEXT, []}, [], []),
+
   ?assertMatch( {ok, {{_, ?HMTL_NOT_FOUND, _}, _, _}} ,
                 httpc:request(get, RequestAcc, [], [])),
   ok.
@@ -414,8 +404,6 @@ ebanx_reset_ok(_Config) ->
 %%% Description: Test the POST method withdrawing money
 %%%===================================================================
 ebanx_withdraw_ok(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Create only one account
   Info1 = jsone:encode( #{?OP_TYPE    => ?OP_DEPOSIT,
@@ -449,8 +437,6 @@ ebanx_withdraw_ok(_Config) ->
 %%%              account
 %%%===================================================================
 ebanx_withdraw_error(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Withdraw some money from a non existent account (Robbery)
   Info2 = jsone:encode( #{?OP_TYPE    => ?OP_WITHDRAW,
@@ -469,8 +455,6 @@ ebanx_withdraw_error(_Config) ->
 %%% Description: Test the POST method with a invalid operation
 %%%===================================================================
 ebanx_invalid_operation_error(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Create only one account
   Info1 = jsone:encode( #{?OP_TYPE    => ?OP_DEPOSIT,
@@ -500,8 +484,6 @@ ebanx_invalid_operation_error(_Config) ->
 %%% Description: Test the POST method with invalid json
 %%%===================================================================
 ebanx_invalid_json_error(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   %% Create only one account
   Info1 = "{\"type\":\"deposit\", \"destination\":100\", \"amount\":10}",
@@ -530,8 +512,6 @@ ebanx_invalid_json_error(_Config) ->
 %%%              ebanx_bank.erl
 %%%===================================================================
 ebanx_bank_full_coverage_ok(_Config) ->
-  %% Start the Server
-  application:ensure_all_started(ebanx),
 
   gen_server:cast(ebanx_bank, {none}),
   gen_server:call(ebanx_bank, {none}),

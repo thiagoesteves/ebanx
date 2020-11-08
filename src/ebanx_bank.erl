@@ -55,9 +55,9 @@ start_link() ->
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
--spec init(list()) -> {ok, map()} | ignore | {stop, term()}.
+-spec init(list()) -> {ok, list()}.
 init([]) ->
-  logger:set_module_level(?MODULE, info),
+  logger:set_module_level(?MODULE, error),
   %% Enable trapping exits
   process_flag(trap_exit, true),
   {ok, [] }.
@@ -105,15 +105,43 @@ code_change(_OldVsn, State, _Extra) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc This function returns the current balance for the requested ID.
+%%
+%% @param AccountId Requested ID
+%% @end
+%%--------------------------------------------------------------------
+-spec get_balance(binary()) -> {ok, binary()}.
 get_balance(AccountId) ->
   gen_server:call(?MODULE, {get_balance, AccountId}).
 
+%%--------------------------------------------------------------------
+%% @doc This function updateds the balances depending on the operation.
+%%
+%% @param Map Operation information
+%% @end
+%%--------------------------------------------------------------------
+-spec update(map()) -> binary().
 update(Map) ->
   gen_server:call(?MODULE, {update, Map}).
 
+%%--------------------------------------------------------------------
+%% @doc This function checks if the ID exist
+%%
+%% @param AccountId Requested ID
+%% @end
+%%--------------------------------------------------------------------
+-spec account_exist(map()) -> boolean().
 account_exist(AccountId) ->
   gen_server:call(?MODULE, {account_exist, AccountId}).
 
+%%--------------------------------------------------------------------
+%% @doc This function resets the whole database
+%%
+%% @end
+%%--------------------------------------------------------------------
+-spec reset() -> ok.
 reset() ->
   gen_server:call(?MODULE, {reset}).
 
@@ -121,12 +149,26 @@ reset() ->
 %% Internal functions
 %%====================================================================
 
+%%--------------------------------------------------------------------
+%% @doc This function returns the current balance for the requested ID.
+%%
+%% @param AccountId Requested ID
+%% @end
+%%--------------------------------------------------------------------
+-spec get_balance_priv(binary()) -> {ok, binary()}.
 get_balance_priv(AccountId) ->
   %% Get Balance, check were already done by resource_exist
   ?LOG_INFO("Get Balance from Account: ~p", [AccountId]),
   Balance = get( {?ACCOUNT_TOKEN, AccountId} ),
   {ok, i2b(Balance)}.
 
+%%--------------------------------------------------------------------
+%% @doc This function updateds the balances depending on the operation.
+%%
+%% @param Map Operation information
+%% @end
+%%--------------------------------------------------------------------
+-spec update_priv(map()) -> binary().
 update_priv(#{?OP_TYPE   := ?OP_DEPOSIT,
               ?ACC_DEST  := Dest,
               ?ACC_AMOUNT:= Amount} = _Map) ->
@@ -160,31 +202,32 @@ update_priv(#{?OP_TYPE    := ?OP_TRANSFER,
   ?LOG_INFO("Transfer - Origin: ~p, Dest: ~p, Amount: ~p", [Origin, Dest, Amount]),
   %% Update, checks were already done by resource_exist
   O = get({?ACCOUNT_TOKEN, Origin}) - Amount,
-  D = get({?ACCOUNT_TOKEN, Dest}) + Amount,
+  %% Check if Destination exist, if not, create one
+  D = case get({?ACCOUNT_TOKEN, Dest}) of
+    undefined -> Amount;
+    V -> V + Amount
+  end,
   put({?ACCOUNT_TOKEN, Origin}, O),
   put({?ACCOUNT_TOKEN, Dest},   D),
   jsone:encode(
     #{?ACC_ORIGIN => #{ <<"id">> => Origin, <<"balance">> => O},
       ?ACC_DEST   => #{ <<"id">> => Dest,   <<"balance">> => D} } ).
 
-account_exist_priv(#{?OP_TYPE    := ?OP_TRANSFER,
-                     ?ACC_DEST   := Dest,
-                     ?ACC_ORIGIN := Origin} = _Map) ->
-  ?LOG_INFO("Check Accounts exist for transfer: ~p ~p", [Dest, Origin]),
-  %% Check Account Exist
-  case { get({?ACCOUNT_TOKEN, Origin}), get({?ACCOUNT_TOKEN, Dest}) } of
-    {undefined, _} -> false;
-    {_, undefined} -> false;
-    _   -> true
-  end;
-
+%%--------------------------------------------------------------------
+%% @doc This function checks if the ID exist
+%%
+%% @param AccountId Requested ID
+%% @end
+%%--------------------------------------------------------------------
+-spec account_exist_priv(map()) -> boolean().
 account_exist_priv(#{?OP_TYPE := ?OP_DEPOSIT} = _Map) ->
   ?LOG_INFO("No check is needed for a deposit"),
   true;
 
-account_exist_priv(#{?OP_TYPE    := ?OP_WITHDRAW,
-                     ?ACC_ORIGIN := Origin} = _Map) ->
-  ?LOG_INFO("Check Accounts exist for withdraw: ~p", [Origin]),
+account_exist_priv(#{?OP_TYPE    := Type,
+                     ?ACC_ORIGIN := Origin} = _Map)
+  when Type =:= ?OP_WITHDRAW; Type =:= ?OP_TRANSFER->
+  ?LOG_INFO("Check Accounts exist for ~p: ~p", [Type, Origin]),
   %% Check Account Exist
   case get({?ACCOUNT_TOKEN, Origin}) of
     undefined -> false;
@@ -203,6 +246,13 @@ account_exist_priv(AccountId) ->
     _   -> true
   end.
 
+%%--------------------------------------------------------------------
+%% @doc This function converts integer to binary
+%%
+%% @param Int Integer to be converted
+%% @end
+%%--------------------------------------------------------------------
+-spec i2b(integer()) -> binary().
 i2b(Int) ->
   erlang:integer_to_binary(Int).
 
