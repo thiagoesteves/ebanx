@@ -99,3 +99,9 @@ curl -i -H "Content-Type: application/json" -X POST -d '{"type":"transfer", "ori
 ```
 make test
 ```
+
+### Static Analysis (Dialyzer)
+
+```
+make check
+```

@@ -125,19 +125,25 @@ provided_operation_to_html(Req0, #{operation := help} = State) ->
   {Body, Req0, State}.
 
 %% Execute Operation for json application
-accepted_operation_to_json(Req0, #{operation := reset}) ->
+accepted_operation_to_json(Req0, #{operation := reset} = State) ->
   ?LOG_INFO("HTTP Post reset operation"),
   ok = ebanx_bank:reset(),
   Req1 = cowboy_req:set_resp_body(?REST_OK, Req0),
-  cowboy_req:reply(?HMTL_OK, Req1);
+  cowboy_req:reply(?HMTL_OK, Req1),
+  %% For Cowboy callbacks to stop processing, the return must include
+  %% the stop atom to halt any further processing.
+  {stop, Req1, State};
 
 %% Execute Operation for json application
 accepted_operation_to_json(Req0, #{operation := update,
-                                   post_map := PostMap}) ->
+                                   post_map := PostMap} = State) ->
   ?LOG_INFO("HTTP Post Operation for ~p Req: ~p", [PostMap, Req0]),
   Res = ebanx_bank:update(PostMap),
   Req1 = cowboy_req:set_resp_body(Res, Req0),
-  cowboy_req:reply(?HMTL_OK_CREATED, Req1).
+  cowboy_req:reply(?HMTL_OK_CREATED, Req1),
+  %% For Cowboy callbacks to stop processing, the return must include
+  %% the stop atom to halt any further processing.
+  {stop, Req1, State}.
 
 %% Check resource exist
 resource_exists(Req0, #{operation := reset} = State) ->
