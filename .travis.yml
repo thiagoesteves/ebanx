@@ -7,4 +7,5 @@ branches:
     - main
 script:
   - make compile
+after_success:
   - make coveralls
